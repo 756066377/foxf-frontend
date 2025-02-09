@@ -24,42 +24,50 @@ export const useUserStore = defineStore('user', () => {
   const token = ref('')
   const username = ref('')
   const memberInfo = ref<MemberInfo | null>(null)
+  const vipStatus = ref(false)  // 新增 VIP 状态的响应式引用
   let heartbeatTimer: number | undefined // 添加心跳定时器变量
 
   // 计算属性
   const isLoggedIn = computed(() => !!token.value)
-  const isVip = computed(() => memberInfo.value?.isMember === 1)
+  const isVip = computed(() => vipStatus.value)  // 使用 vipStatus 的计算属性
 
   // 从本地存储加载用户信息
-  const loadUserInfo = () => {
+  const loadUserInfo = async () => {
     console.log('尝试从本地存储加载用户信息')
-    const savedToken = localStorage.getItem('token')
-    const savedUsername = localStorage.getItem('username')
+    const savedToken = localStorage.getItem('FOXF_TOKEN')
+    const savedUsername = localStorage.getItem('FOXF_USERNAME')
     
     if (savedToken && savedUsername) {
       console.log('找到本地存储的用户信息')
       token.value = savedToken
       username.value = savedUsername
       
-      // 立即启动心跳
-      startHeartbeat()
-      
-      // 立即获取会员信息，但不等待结果
-      memberApi.getMemberInfo(savedToken)
-        .then(response => {
-          if (response.code === 1) {
-            console.log('成功获取会员信息:', response.data)
-            memberInfo.value = response.data
+      try {
+        // 验证 token 有效性
+        const response = await memberApi.heart(savedToken)
+        if (response.code === 1) {
+          console.log('Token 验证成功')
+          vipStatus.value = response.data.isVip
+          
+          // 获取会员信息
+          const memberResponse = await memberApi.getMemberInfo(savedToken)
+          if (memberResponse.code === 1) {
+            memberInfo.value = memberResponse.data
           }
-        })
-        .catch(error => {
-          console.error('获取会员信息失败:', error)
-        })
-      
-      return true
+          
+          // 启动心跳
+          startHeartbeat()
+          return true
+        } else {
+          console.warn('Token 已失效')
+          clearUserInfo()
+        }
+      } catch (error) {
+        console.error('验证 token 失败:', error)
+        clearUserInfo()
+      }
     }
     
-    console.log('本地存储中没有用户信息')
     return false
   }
 
@@ -73,20 +81,31 @@ export const useUserStore = defineStore('user', () => {
 
   // 清除用户信息
   const clearUserInfo = () => {
-    stopHeartbeat()
-    localStorage.removeItem('token')
-    localStorage.removeItem('username')
     token.value = ''
     username.value = ''
     memberInfo.value = null
+    vipStatus.value = false
+    
+    // 清除本地存储（注意不要清除 machine_code）
+    localStorage.removeItem('FOXF_TOKEN')
+    localStorage.removeItem('FOXF_USERNAME')
+    
+    stopHeartbeat()
   }
 
   // 设置心跳定时器
   const startHeartbeat = () => {
-    stopHeartbeat() // 先清除可能存在的定时器
-    heartbeatTimer = window.setInterval(async () => {
-      await heartbeat()
-    }, 10000)
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer)
+    }
+
+    // 立即执行一次心跳
+    heartbeat().catch(console.error)
+
+    // 设置定时器，每30秒执行一次心跳
+    heartbeatTimer = setInterval(() => {
+      heartbeat().catch(console.error)
+    }, 30000)
   }
 
   // 停止心跳定时器
@@ -102,47 +121,67 @@ export const useUserStore = defineStore('user', () => {
     try {
       const response = await memberApi.login(loginData)
       console.log('登录响应:', response)
-
+      
       if (response.code === 1) {
-        saveUserInfo({
-          token: response.data.token,
-          username: loginData.username
-        })
-        startHeartbeat() // 登录成功后启动心跳
-        return true
-      } else {
-        throw new Error(response.msg || '登录失败')
+        token.value = response.data.token
+        username.value = response.data.username
+        vipStatus.value = response.data.isVip
+        
+        localStorage.setItem('FOXF_TOKEN', response.data.token)
+        localStorage.setItem('FOXF_USERNAME', response.data.username)
+        
+        startHeartbeat()
+        return { success: true, message: '登录成功' }
+      }
+      
+      // 处理特定的错误码
+      switch (response.code) {
+        case -1:
+          return { success: false, message: '用户名或密码错误' }
+        case -2:
+          return { success: false, message: '账号已被禁用' }
+        case -3:
+          return { success: false, message: '当前设备已被绑定，请先解绑' }
+        case -4:
+          return { success: false, message: '设备数量超出限制，请先解绑其他设备' }
+        default:
+          return { success: false, message: response.msg || '登录失败' }
       }
     } catch (error) {
       console.error('登录失败:', error)
-      throw error
+      return { 
+        success: false, 
+        message: error instanceof Error ? error.message : '网络错误，请稍后重试'
+      }
     }
   }
 
   // 登出
   const logout = async () => {
     try {
-      console.log('开始登出操作')
-      stopHeartbeat() // 先停止心跳
-      
-      const response = await memberApi.logout(token.value)
-      console.log('登出响应:', response)
-
-      if (response.code === 1) {
-        console.log('登出成功，准备清理用户信息')
-        clearUserInfo() // 清理用户信息
-        console.log('用户信息已清理')
-        return true
+      if (token.value) {
+        // 调用登出 API
+        const response = await memberApi.logout(token.value)
+        console.log('登出响应:', response)
+        
+        if (response.code !== 1) {
+          throw new Error(response.msg || '登出失败')
+        }
       }
       
-      // 如果登出失败，重新启动心跳
-      startHeartbeat()
-      return false
+      // 无论 API 调用是否成功，都清除本地状态
+      clearUserInfo()
+      router.push('/login')
+      return { success: true, message: '已安全退出' }
     } catch (error) {
-      console.error('登出操作出错:', error)
-      // 如果出错，重新启动心跳
-      startHeartbeat()
-      return false
+      console.error('登出错误:', error)
+      // 即使 API 调用失败，也要清除本地状态
+      clearUserInfo()
+      router.push('/login')
+      return { 
+        success: false, 
+        message: error instanceof Error ? error.message : '登出失败，请重试'
+      }
     }
   }
 
@@ -188,46 +227,107 @@ export const useUserStore = defineStore('user', () => {
 
     try {
       const response = await memberApi.heart(token.value)
-      console.log('心跳请求响应:', response)
+      console.log('心跳响应:', response)
       
+      // 根据 API 文档，code=1 表示成功
       if (response.code === 1) {
+        // 更新 VIP 状态
+        vipStatus.value = response.data.isVip  // 使用 vipStatus 而不是 isVip
+        
+        // 获取最新的会员信息
         try {
-          console.log('获取会员信息...')
           const memberResponse = await memberApi.getMemberInfo(token.value)
-          console.log('会员信息响应:', memberResponse)
-          
           if (memberResponse.code === 1) {
-            console.log('更新会员信息:', memberResponse.data)
             memberInfo.value = memberResponse.data
           }
         } catch (error) {
           console.error('获取会员信息失败，但不影响心跳:', error)
         }
+        
         return response
       }
+      
+      // 处理特定错误码
+      if (response.code === -1) {
+        clearUserInfo()
+        router.push('/login')
+      }
+      
       return null
     } catch (error) {
       console.error('心跳请求失败:', error)
-      // 如果是网络错误或服务器错误，不要立即清除用户信息
-      if (!error.message.includes('服务器返回格式错误') && 
-          !error.message.includes('HTTP error')) {
-        clearUserInfo()
+      // 网络错误时继续保持心跳
+      if (error instanceof Error && 
+          (error.message.includes('Network') || error.message.includes('timeout'))) {
+        console.warn('网络错误，继续保持心跳')
+        return null
       }
+      clearUserInfo()
       return null
     }
   }
 
   // 修改密码
-  const updatePassword = async (newPassword: string) => {
+  const updatePassword = async (params: { oldPassword: string; newPassword: string }) => {
     try {
+      if (!token.value) {
+        throw new Error('未登录状态')
+      }
+
       const response = await memberApi.updatePassword({
         token: token.value,
-        newPassword
+        newPassword: params.newPassword
       })
-      return response.code === 1
+
+      if (response.code === 1) {
+        return { success: true, message: '密码修改成功' }
+      }
+
+      // 处理特定的错误码
+      switch (response.code) {
+        case -1:
+          return { success: false, message: '原密码错误' }
+        case -2:
+          return { success: false, message: '账号已被禁用' }
+        default:
+          return { success: false, message: response.msg || '修改密码失败' }
+      }
     } catch (error) {
       console.error('修改密码失败:', error)
-      return false
+      return { 
+        success: false, 
+        message: error instanceof Error ? error.message : '修改密码失败，请稍后重试'
+      }
+    }
+  }
+
+  // 添加解绑方法
+  const unbind = async (unbindParams: { username: string; password: string }) => {
+    try {
+      const response = await memberApi.unbind(unbindParams)
+      console.log('解绑响应:', response)
+      
+      if (response.code === 1) {
+        // 解绑成功后清除用户信息
+        clearUserInfo()
+        return { success: true, message: '解绑成功' }
+      }
+      
+      // 处理特定的错误码
+      switch (response.code) {
+        case -1:
+          return { success: false, message: '用户名或密码错误' }
+        case -2:
+          return { success: false, message: '账号已被禁用' }
+        default:
+          return { success: false, message: response.msg || '解绑失败' }
+      }
+    } catch (error) {
+      console.error('解绑失败:', error)
+      return { 
+        success: false, 
+        message: error instanceof Error ? error.message : '解绑失败，请稍后重试'
+      }
     }
   }
 
@@ -237,13 +337,15 @@ export const useUserStore = defineStore('user', () => {
     memberInfo,
     isLoggedIn,
     isVip,
+    vipStatus,
     login,
     logout,
+    unbind,
     heartbeat,
     updatePassword,
     checkLogin,
     loadUserInfo,
-    startHeartbeat, // 导出心跳控制方法
+    startHeartbeat,
     stopHeartbeat
   }
 }) 

@@ -35,6 +35,75 @@ interface MemberInfoResponse {
   timestamp: string;
 }
 
+interface HeartbeatResponse {
+  msg: string;
+  code: number;
+  data: {
+    isVip: boolean;
+  };
+  signature: string;
+  timestamp: string;
+}
+
+interface RechargeResponse {
+  msg: string;
+  code: number;
+  signature: string;
+  timestamp: string;
+}
+
+interface UpdatePasswordResponse {
+  msg: string;
+  code: number;
+  signature: string;
+  timestamp: string;
+}
+
+// 添加版本信息接口
+interface VersionInfo {
+  isDisable: number // 0-正常 1-禁用中
+  developerId: number
+  forced: number // 0-不强制 1-强制
+  appId: number
+  num: string
+  name: string
+  updateTime: string
+  id: number
+  addr: string
+  content: string
+}
+
+interface VersionResponse {
+  msg: string
+  code: number
+  data: VersionInfo
+  signature: string
+  timestamp: string
+}
+
+// 添加工单类型接口
+interface WorkType {
+  id: number
+  name: string
+  count?: number // 添加工单数量字段
+}
+
+interface WorkTypeResponse {
+  msg: string
+  code: number
+  data: Array<WorkType>
+  signature: string
+  timestamp: string
+}
+
+// 修改解绑接口
+interface UnbindResponse {
+  msg: string
+  code: number
+  signature: string
+  timestamp: string
+}
+
 const APP_KEY = 'r08urpht0vbhx2vt';
 const APP_ID = 82;
 
@@ -52,22 +121,28 @@ const makeRequest = async (url: string, options: RequestInit = {}) => {
 
     // 检查响应状态
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      throw new Error(`网络请求失败: ${response.status}`)
     }
 
-    // 尝试解析 JSON，不管 Content-Type
+    const text = await response.text()
     try {
-      const data = await response.json()
+      const data = JSON.parse(text)
       console.log('请求响应:', data)
+      
+      if (typeof data !== 'object' || data === null) {
+        throw new Error('服务器响应格式错误')
+      }
+
+      // 处理业务错误码
+      if (data.code !== 1 && data.msg) {
+        console.warn('业务错误:', data.msg)
+      }
+
       return data
-    } catch (error) {
-      console.error('JSON 解析失败:', error)
-      // 如果 JSON 解析失败，再检查 Content-Type
-      const contentType = response.headers.get('content-type')
-      console.error('响应类型:', contentType)
-      const text = await response.text()
-      console.error('响应内容:', text)
-      throw new Error('响应格式错误')
+    } catch (parseError) {
+      console.error('JSON 解析失败:', parseError)
+      console.error('原始响应:', text)
+      throw new Error('服务器响应格式错误')
     }
   } catch (error) {
     console.error('请求失败:', error)
@@ -144,35 +219,38 @@ export const memberApi = {
     return response.json()
   },
 
-  // 解绑设备
+  // 修改解绑接口
   unbind: async (unbindParams: { username: string; password: string }) => {
     const timestamp = Date.now().toString()
     const mac = getMachineCode()
     
-    const signStr = `appId=${APP_ID}&mac=${mac}&password=${unbindParams.password}&timestamp=${timestamp}&username=${unbindParams.username}${APP_KEY}`
+    const signStr = `appId=${APP_ID}&mac=${mac}&originalMac=${mac}&timestamp=${timestamp}&username=${unbindParams.username}${APP_KEY}`
     const signature = md5(signStr)
 
     const searchParams = new URLSearchParams({
       appId: APP_ID.toString(),
       username: unbindParams.username,
-      password: unbindParams.password,
+      originalMac: mac, // 添加原机器码参数
       mac: mac,
       timestamp: timestamp,
       signature: signature
     })
 
-    const response = await fetch(
-      `/api/member/unbind?${searchParams.toString()}`,
-      {
+    try {
+      const response = await makeRequest(`/api/member/unbind?${searchParams.toString()}`, {
         method: 'GET',
+        credentials: 'include'
+      }) as UnbindResponse
+
+      if (response.code === 1) {
+        return response
       }
-    )
-
-    if (!response.ok) {
-      throw new Error('Network response was not ok')
+      
+      throw new Error(response.msg || '解绑失败')
+    } catch (error) {
+      console.error('解绑请求失败:', error)
+      throw error
     }
-
-    return response.json()
   },
 
   // 获取会员信息
@@ -198,7 +276,7 @@ export const memberApi = {
   },
 
   // 用户心跳
-  heart: async (token: string) => {
+  heart: async (token: string): Promise<HeartbeatResponse> => {
     const timestamp = Date.now().toString()
     const mac = getMachineCode()
     
@@ -213,10 +291,22 @@ export const memberApi = {
       signature: signature
     })
 
-    return makeRequest(`/api/member/heart?${searchParams.toString()}`, {
-      method: 'GET',
-      credentials: 'include'
-    })
+    try {
+      const response = await makeRequest(`/api/member/heart?${searchParams.toString()}`, {
+        method: 'GET',
+        credentials: 'include'
+      }) as HeartbeatResponse
+
+      // 根据 API 文档验证响应结构
+      if (response.code === 1 && response.msg === "心跳成功") {
+        return response
+      }
+      
+      throw new Error(response.msg || '心跳请求失败')
+    } catch (error) {
+      console.error('心跳请求失败:', error)
+      throw error
+    }
   },
 
   // 用户登出
@@ -235,14 +325,21 @@ export const memberApi = {
       signature: signature
     })
 
-    const response = await fetch(
-      `/api/member/logout?${searchParams.toString()}`,
-      {
-        method: 'GET'
-      }
-    )
+    try {
+      const response = await makeRequest(`/api/member/logout?${searchParams.toString()}`, {
+        method: 'GET',
+        credentials: 'include'
+      })
 
-    return response.json()
+      if (response.code === 1) {
+        return response
+      }
+      
+      throw new Error(response.msg || '登出失败')
+    } catch (error) {
+      console.error('登出请求失败:', error)
+      throw error
+    }
   },
 
   // 修改密码
@@ -262,18 +359,124 @@ export const memberApi = {
       signature: signature
     })
 
-    const response = await fetch(
-      `/api/member/update-pwd?${searchParams.toString()}`,
-      {
-        method: 'GET'
-      }
-    )
+    try {
+      const response = await makeRequest(`/api/member/update-pwd?${searchParams.toString()}`, {
+        method: 'GET',
+        credentials: 'include'
+      }) as UpdatePasswordResponse
 
-    return response.json()
+      if (response.code === 1) {
+        return response
+      }
+      
+      throw new Error(response.msg || '修改密码失败')
+    } catch (error) {
+      console.error('修改密码请求失败:', error)
+      throw error
+    }
   },
 
   // 心跳请求
   heartbeat: () => {
     return request.post('/member/heartbeat')
+  },
+
+  // 添加充值方法
+  recharge: async (params: { username: string; card: string }) => {
+    const timestamp = Date.now().toString()
+    const mac = getMachineCode()
+    
+    const signStr = `appId=${APP_ID}&card=${params.card}&mac=${mac}&timestamp=${timestamp}&username=${params.username}${APP_KEY}`
+    const signature = md5(signStr)
+
+    const searchParams = new URLSearchParams({
+      appId: APP_ID.toString(),
+      username: params.username,
+      card: params.card,
+      mac: mac,
+      timestamp: timestamp,
+      signature: signature
+    })
+
+    try {
+      const response = await makeRequest(`/api/member/recharge?${searchParams.toString()}`, {
+        method: 'GET',
+        credentials: 'include'
+      }) as RechargeResponse
+
+      if (response.code === 1) {
+        return response
+      }
+      
+      throw new Error(response.msg || '充值失败')
+    } catch (error) {
+      console.error('充值请求失败:', error)
+      throw error
+    }
+  },
+
+  // 添加获取最新版本方法
+  getLatestVersion: async () => {
+    const timestamp = Date.now().toString()
+    const mac = getMachineCode()
+    
+    const signStr = `appId=${APP_ID}&mac=${mac}&timestamp=${timestamp}${APP_KEY}`
+    const signature = md5(signStr)
+
+    const searchParams = new URLSearchParams({
+      appId: APP_ID.toString(),
+      mac: mac,
+      timestamp: timestamp,
+      signature: signature
+    })
+
+    try {
+      const response = await makeRequest(`/api/expand/new-ver?${searchParams.toString()}`, {
+        method: 'GET',
+        credentials: 'include'
+      }) as VersionResponse
+
+      if (response.code === 1) {
+        return response.data
+      }
+      
+      throw new Error(response.msg || '获取版本信息失败')
+    } catch (error) {
+      console.error('获取版本信息失败:', error)
+      throw error
+    }
+  },
+
+  // 添加获取工单类型方法
+  getWorkTypes: async (token: string) => {
+    const timestamp = Date.now().toString()
+    const mac = getMachineCode()
+    
+    const signStr = `appId=${APP_ID}&mac=${mac}&timestamp=${timestamp}&token=${token}${APP_KEY}`
+    const signature = md5(signStr)
+
+    const searchParams = new URLSearchParams({
+      appId: APP_ID.toString(),
+      token: token,
+      mac: mac,
+      timestamp: timestamp,
+      signature: signature
+    })
+
+    try {
+      const response = await makeRequest(`/api/member/get-work-type?${searchParams.toString()}`, {
+        method: 'GET',
+        credentials: 'include'
+      }) as WorkTypeResponse
+
+      if (response.code === 1) {
+        return response.data
+      }
+      
+      throw new Error(response.msg || '获取工单类型失败')
+    } catch (error) {
+      console.error('获取工单类型失败:', error)
+      throw error
+    }
   }
 }; 

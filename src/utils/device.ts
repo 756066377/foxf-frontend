@@ -1,20 +1,20 @@
 export const getMachineCode = (): string => {
-  // 生成一个固定格式的机器码：12位数字和字母的组合
-  const generateCode = () => {
-    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    let result = '';
-    for (let i = 0; i < 12; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
+  const STORAGE_KEY = 'FOXF_MACHINE_CODE'
   
-  // 从本地存储获取机器码，如果没有则生成新的
-  let machineCode = localStorage.getItem('machine_code');
+  // 从本地存储获取机器码
+  let machineCode = localStorage.getItem(STORAGE_KEY)
+  
   if (!machineCode) {
-    machineCode = generateCode();
-    localStorage.setItem('machine_code', machineCode);
+    // 生成一个固定格式的机器码：12位数字和字母的组合
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    machineCode = Array(12)
+      .fill(0)
+      .map(() => chars.charAt(Math.floor(Math.random() * chars.length)))
+      .join('')
+      
+    // 保存到本地存储
+    localStorage.setItem(STORAGE_KEY, machineCode)
   }
   
-  return machineCode;
-}; 
+  return machineCode
+} 

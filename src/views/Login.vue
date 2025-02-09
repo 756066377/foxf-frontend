@@ -207,7 +207,7 @@
                 </div>
               
                 <!-- 表单内容 -->
-                <form id="loginForm" @submit.prevent="login">
+                <form id="loginForm" @submit.prevent="handleLogin">
                   <!-- 用户名输入框 -->
                   <div class="space-y-8">
                     <div class="relative">
@@ -643,29 +643,35 @@ export default defineComponent({
       }, 3000)
     }
 
-    const login = async () => {
+    const handleLogin = async () => {
       if (!username.value || !password.value) {
         showToastMessage('请输入用户名和密码', false)
         return
       }
 
+      loading.value = true
       try {
-        loading.value = true
-        const success = await userStore.login({
+        const result = await userStore.login({
           username: username.value,
           password: password.value
         })
 
-        if (success) {
+        if (result.success) {
           showToastMessage('登录成功', true)
-          // 延迟 1 秒后跳转，给 token 一些生效时间
+          // 延迟跳转，让用户看到成功提示
           setTimeout(() => {
             router.push('/home')
           }, 1000)
+        } else {
+          showToastMessage(result.message, false)
+          // 如果是设备相关错误，显示解绑选项
+          if (result.message.includes('设备')) {
+            showUnbindModal.value = true
+          }
         }
-      } catch (error: any) {
-        console.error('登录失败:', error)
-        showToastMessage(error.message || '登录失败，请稍后重试', false)
+      } catch (error) {
+        console.error('登录错误:', error)
+        showToastMessage('登录失败，请稍后重试', false)
       } finally {
         loading.value = false
       }
@@ -677,31 +683,31 @@ export default defineComponent({
 
     const handleUnbind = async () => {
       if (!unbindUsername.value || !unbindPassword.value) {
-        showToastMessage('请填写完整信息', false)
+        showToastMessage('请输入账号和密码', false)
         return
       }
 
+      loading.value = true
       try {
-        unbindLoading.value = true
-        const response = await memberApi.unbind({
+        const result = await userStore.unbind({
           username: unbindUsername.value,
-          password: unbindPassword.value,
+          password: unbindPassword.value
         })
 
-        if (response.code === 1) {
-          showToastMessage('解绑成功', true)
+        if (result.success) {
+          showToastMessage('解绑成功，请重新登录', true)
           showUnbindModal.value = false
-          // 清空表单
+          // 清空解绑表单
           unbindUsername.value = ''
           unbindPassword.value = ''
         } else {
-          showToastMessage(response.msg, false)
+          showToastMessage(result.message, false)
         }
       } catch (error) {
-        console.error('解绑失败:', error)
+        console.error('解绑错误:', error)
         showToastMessage('解绑失败，请稍后重试', false)
       } finally {
-        unbindLoading.value = false
+        loading.value = false
       }
     }
 
@@ -750,7 +756,7 @@ export default defineComponent({
       showPassword,
       errors,
       isValid,
-      login,
+      handleLogin,
       togglePassword,
       showToast,
       toastMessage,

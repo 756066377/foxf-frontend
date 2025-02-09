@@ -40,7 +40,10 @@ export default {
             secondary: '#64748B', // 次要文本
             accent: '#334155',    // 强调文本
           }
-        }
+        },
+        'primary-focus': '#4338CA',
+        'secondary-focus': '#4F46E5',
+        'accent-focus': '#6D28D9',
       },
       // 添加自定义间距
       spacing: {
@@ -77,12 +80,18 @@ export default {
         'fade': {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
+        },
+        float: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-10px)' },
         }
       },
       animation: {
         'slide-up': 'slide-up 0.3s ease-out',
         'slide-down': 'slide-down 0.3s ease-out',
         'fade': 'fade 0.3s ease-out',
+        'float': 'float 6s ease-in-out infinite',
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       },
 
       // 添加自定义过渡
