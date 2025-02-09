@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%; /* 为了兼容旧版 iOS Safari */
+  -moz-text-size-adjust: 100%; /* 为了兼容旧版 Firefox */
+} 
