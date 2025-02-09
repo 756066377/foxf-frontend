@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # FoxF - 游戏辅助工具
 
 FoxF 是一个现代化的游戏辅助工具，提供专业的驱动管理和功能支持。
@@ -79,3 +80,6 @@ npm run build
 ## 许可证
 
 [MIT License](LICENSE)
+=======
+# foxf-frontend
+>>>>>>> 333d02ede8fca27083c6d78887ada0b46b23a452
